@@ -1,0 +1,546 @@
+
+# 1) ------ eksctl install ------#
+
+curl --silent --location "https://github.com/weaveworks/eksctl/releases/latest/download/eksctl_$(uname -s)_amd64.tar.gz" | tar xz -C /tmp
+
+sudo mv /tmp/eksctl /usr/local/bin
+
+eksctl version
+
+# 2) ------ kubeadm kubectl kubelet -----#
+
+sudo apt-get update
+
+sudo apt-get install -y apt-transport-https ca-certificates curl gpg
+
+sudo mkdir -p /etc/apt/keyrings
+
+curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.31/deb/Release.key | sudo gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+
+echo 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.31/deb/ /' | sudo tee /etc/apt/sources.list.d/kubernetes.list
+
+sudo apt-get update
+sudo apt-get install -y kubelet kubeadm kubectl
+sudo apt-mark hold kubelet kubeadm kubectl
+
+sudo apt install containerd
+
+sudo modprobe br_netfilter
+sudo sysctl -p /etc/sysctl.conf
+     net.bridge.bridge-nf-call-iptables=1
+     net.ipv4.ip_forward=1
+
+
+kubectl --insecure-skip-tls-verify get nodes   #ignor certificate
+
+sudo systemctl restart kubelet
+
+sudo kubeadm init --pod-network-cidr=10.244.0.0/16
+
+sudo kubeadm token create --print-join-command  #gives the join of the master node
+
+
+# 3) ----- kubectl -----#
+
+curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+
+sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
+
+chmod +x kubectl
+mkdir -p ~/.local/bin
+mv ./kubectl ~/.local/bin/kubectl
+
+kubectl version --client     
+
+(Or use this for detailed view of version):
+
+kubectl version --client --output=yaml
+
+# 4) -----eks map config -----#
+
+aws configure
+aws configure --profile <user name>
+kubectl config view --minify  ????????????????????????????????????
+aws eks update-kubeconfig --name pc-kluster(cluster name)
+kubectl get cm aws-auth -o yaml -n kube-system
+kubectl edit cm aws-auth -n kube-system
+
+kubectl apply -f my-file.yaml
+
+kubectl create rolebinding account-binding --role=account-role --serviceaccount=default:build-robot
+
+kubectl get rolebinding account-binding -o yaml > account-rolebinding.yaml
+
+
+# kubernetisum user account certificate avtomat storagrelu hamar hraman, voric heto stexcum enq yaml file(kind - Issuer ev Certificate, voric heto secreti tvac tls.crt ev tls.key encode arac certificatnere texadrum enq cofig filum)
+kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.15.0/cert-manager.yaml
+
+
+apiVersion: v1
+data:
+  mapRoles: |
+    - groups:
+      - system:bootstrappers
+      - system:nodes
+      rolearn: arn:aws:iam::515966519427:role/ed-eks-worker
+      username: system:node:{{EC2PrivateDNSName}}
+  mapUsers: |
+    - userarn: arn:aws:iam::515966519427:user/tatev
+      groups:
+        - system:masters
+kind: ConfigMap
+metadata:
+  creationTimestamp: "2025-04-07T10:04:00Z"
+  name: aws-auth
+  namespace: kube-system
+  resourceVersion: "6655"
+  uid: ffaa30f4-b355-4480-97ec-79f2913bc7dc
+
+
+
+mapUsers: |
+  - userarn: arn:aws:iam::515966519427:user/tatev
+    groups:
+      - system:masters
+
+
+
+# 5) ----- install ingress controller with Manifests -----#
+
+
+git clone https://github.com/nginx/kubernetes-ingress.git
+
+cd kubernetes-ingress
+
+kubectl apply -f deployments/common/ns-and-sa.yaml
+
+kubectl apply -f deployments/rbac/rbac.yaml
+
+kubectl apply -f deployments/rbac/ap-rbac.yaml
+
+kubectl apply -f deployments/rbac/apdos-rbac.yaml
+
+kubectl apply -f examples/shared-examples/default-server-secret/default-server-secret.yaml
+
+kubectl apply -f deployments/common/nginx-config.yaml
+
+kubectl apply -f deployments/common/ingress-class.yaml
+
+kubectl apply -f https://raw.githubusercontent.com/nginx/kubernetes-ingress/v4.0.1/deploy/crds.yaml
+
+kubectl apply -f https://raw.githubusercontent.com/nginx/kubernetes-ingress/v4.0.1/deploy/crds-nap-waf.yaml
+
+kubectl apply -f https://raw.githubusercontent.com/nginx/kubernetes-ingress/v4.0.1/deploy/crds-nap-dos.yaml
+
+kubectl apply -f deployments/deployment/nginx-ingress.yaml
+
+kubectl apply -f deployments/daemon-set/nginx-ingress.yaml
+
+kubectl get pods --namespace=nginx-ingress
+
+# 5.1) ------- install ingress controller with helm ---------#
+
+#Add the official ingress-nginx Helm repo
+helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
+
+#Update your Helm repo list
+helm repo update
+
+#Create a namespace (optional but recommended)
+kubectl create namespace ingress-nginx
+
+#Install the ingress-nginx Helm chart into the namespace
+helm install ingress-nginx ingress-nginx/ingress-nginx --namespace ingress-nginx
+
+kubectl get pods -n ingress-nginx
+kubectl get svc -n ingress-nginx
+
+
+# 6) ----------- install java --------#
+
+sudo apt-get update
+sudo apt-get install openjdk-11-jre    #number 11 is version java, which we choos
+
+
+# 7) ---------- install jenkins --------#
+
+
+sudo wget -O /etc/apt/keyrings/jenkins-keyring.asc \
+  https://pkg.jenkins.io/debian-stable/jenkins.io-2023.key
+
+echo "deb [signed-by=/etc/apt/keyrings/jenkins-keyring.asc]" \
+  https://pkg.jenkins.io/debian-stable binary/ | sudo tee \
+  /etc/apt/sources.list.d/jenkins.list > /dev/null
+
+sudo apt-get update
+sudo apt-get install jenkins
+
+sudo systemctl enable jenkins
+sudo systemctl start jenkins
+sudo systemctl status jenkins
+
+# 8) ---------- install docker ----------#
+
+# System prep
+sudo apt-get update
+sudo apt-get install -y ca-certificates curl gnupg
+
+# GPG key
+sudo install -m 0755 -d /etc/apt/keyrings
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo tee /etc/apt/keyrings/docker.asc > /dev/null
+sudo chmod a+r /etc/apt/keyrings/docker.asc
+
+# Add repo (for 22.04 or fallback for 24.04)
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu jammy stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+
+# Install Docker
+sudo apt-get update
+sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+
+sudo systemctl status docker
+sudo systemctl start docker
+sudo systemctl enable docker
+
+# Test
+sudo docker run hello-world
+
+# Optional: no sudo
+sudo usermod -aG docker $USER
+newgrp docker
+
+# 9) ---------- install helm ----------#
+
+sudo apt update
+sudo apt install apt-transport-https curl -y
+curl https://baltocdn.com/helm/signing.asc | sudo apt-key add -
+
+echo "deb https://baltocdn.com/helm/stable/debian/ all main" | sudo tee /etc/apt/sources.list.d/helm-stable-debian.list
+
+sudo apt update1
+sudo apt install helm -y
+helm version
+
+
+# 10) ------- AWS and GCP credentials -------
+
+export AWS_ACCESS_KEY_ID=
+export AWS_SECRET_ACCESS_KEY=
+export AWS_DEFAULT_REGION=
+
+
+export GOOGLE_APPLICATION_CREDENTIALS="/home/styop/Desktop/arevik-key.json"
+export CLOUDSDK_CORE_PROJECT="my-gcp-project"
+export CLOUDSDK_COMPUTE_REGION="us-west1"
+export CLOUDSDK_COMPUTE_ZONE="us-west1-a"
+
+
+# 11) ------  URL for different links  -------
+# for Data source
+https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/ami
+
+
+
+
+# 12) linux firewall iptables commands
+# To close (block) port 80 (HTTP) -A(Append)
+sudo iptables -A INPUT -p tcp --dport 80 -j DROP
+
+# To list iptables
+sudo iptables -L -n --line-numbers
+
+# This deletes rule number 3 in the INPUT chain.
+sudo iptables -D INPUT 3
+
+# To open port 80 (http) -D(Delete)
+sudo iptables -D INPUT -p tcp --dport 80 -j DROP
+
+# To save iptables rules
+sudo apt install iptables-persistent
+sudo netfilter-persistent save
+
+
+# 13)  delete localhost's cache
+sudo systemd-resolve --flush-caches
+
+
+# 14) script for user-data
+#!/bin/bash
+# Update system
+dnf update -y
+
+# Install nginx
+dnf install -y nginx
+
+# Enable and start nginx
+systemctl enable nginx
+systemctl start nginx
+
+# Create a styled index.html with public IP
+cat <<EOF > /usr/share/nginx/html/index.html
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Welcome</title>
+</head>
+<body style="background-color:yellow">
+  <h1 style="color:red; text-align:center; margin-top:100px;">
+    Hello from $(curl -s ipinfo.io/ip)
+  </h1>
+</body>
+</html>
+EOF
+
+
+# 15) create .ssh folder for jenkins user
+sudo mkdir -p /var/lib/jenkins/.ssh
+sudo cp .ssh/known_hosts /var/lib/jenkins/.ssh/
+sudo chown -R jenkins:jenkins /var/lib/jenkins/.ssh
+
+
+# for update
+sudo vim /etc/apt/sources.list.d/kubernetes.list
+
+#-----------------  DB  ------------------#
+
+# 16) psql login backend container, install mysql, login mysqldb container
+docker exec -it backend sh
+apt update
+apt install -y default-mysql-client
+mysql --version
+mysql -h mysql-db -u root -proot
+SHOW DATABASES;
+SELECT user, host FROM mysql.user;
+SELECT * FROM users;
+USE mydatabase;
+DELETE FROM users WHERE id = 1;
+
+
+#-----============  instal and login postgresql  ------==========#
+#--- login psql, create user, db in postgresql and login with new user
+sudo -u postgres psql                             # login psql
+CREATE USER myuser WITH PASSWORD 'mypassword';    # create user and password for that user
+ALTER USER myuser WITH SUPERUSER;                 # that user have root privileges, full access in psql
+GRANT ALL PRIVILEGES ON DATABASE mydb TO myuser;  # root privileges that db
+ALTER USER myuser CREATEDB;                       # User can create/drop their own databases
+CREATE DATABASE mydb OWNER myuser;                # create databasa for myuser user
+CREATE DATABASE my_new_database;                  # create databace
+\c my_new_database                                # you can connect that db
+\du                                               # can you see all users
+\l+                                               # can you see all db
+\q                                                # log out
+psql -U myuser -d mydb                            # write password for myuser and do Enter
+
+
+#----------------  UBUNTU  ---------------#
+#-------- (20.04, 22.04, 24.04 "x86/64, amd64 → Standard servers") -------#
+sudo apt update
+sudo apt install wget ca-certificates gnupg -y
+wget -qO - https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+  | sudo gpg --dearmor -o /usr/share/keyrings/postgresql.gpg
+
+echo "deb [signed-by=/usr/share/keyrings/postgresql.gpg] \
+https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
+  | sudo tee /etc/apt/sources.list.d/pgdg.list
+
+sudo apt update
+
+# Install PostgreSQL 14 specifically
+sudo apt install postgresql-14 postgresql-client-14 postgresql-contrib-14 -y
+
+sudo apt install postgresql postgresql-contrib -y
+sudo systemctl enable --now postgresql
+sudo systemctl status postgresql
+psql --version
+
+sudo apt update
+sudo apt install nano vim -y
+
+sudo nano /etc/postgresql/*/main/pg_hba.conf  #change peer --> to --> scram-sha-256 (Ctrl+O Enter, Ctrl+x)
+sudo systemctl restart postgresql
+sudo -u postgres psql
+
+
+#-------- Debian -------#
+sudo apt update
+sudo apt install wget ca-certificates gnupg -y
+wget -qO - https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo gpg --dearmor -o /usr/share/keyrings/postgresql.gpg
+
+echo "deb [signed-by=/usr/share/keyrings/postgresql.gpg] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list
+sudo apt update
+
+# Install PostgreSQL 14 specifically
+sudo apt install postgresql-14 postgresql-client-14 postgresql-contrib-14 -y
+
+sudo apt install postgresql postgresql-contrib -y
+sudo systemctl enable --now postgresql
+sudo systemctl status postgresql
+psql --version
+sudo nano /etc/postgresql/*/main/pg_hba.conf  #change peer --> to --> scram-sha-256 (Ctrl+O Enter, Ctrl+x)
+sudo systemctl restart postgresql
+sudo -u postgres psql
+
+
+#---------- CentOS-9 ----------#
+sudo dnf install -y https://download.postgresql.org/pub/repos/yum/reporpms/EL-9-x86_64/pgdg-redhat-repo-latest.noarch.rpm
+sudo dnf -qy module disable postgresql
+
+sudo dnf install -y postgresql17-server postgresql17
+
+sudo /usr/pgsql-17/bin/postgresql-17-setup initdb
+
+sudo systemctl enable --now postgresql-17
+
+systemctl status postgresql-17
+
+sudo -u postgres psql
+
+sudo vi /var/lib/pgsql/17/data/pg_hba.conf  #change peer --> to --> scram-sha-256
+
+sudo systemctl restart postgresql-17
+
+ 
+
+# login postgresql
+# grum enq dbii ip hascen
+psql -h 34.64.160.227 -U postgres -d postgres
+
+# iptables firewall
+# ays hraman@ bacume port@ ev gcum iptable-i amenatak@
+sudo iptables -A INPUT -p tcp --dport 44001 -j ACCEPT
+
+# ays hraman@ pakume port@
+sudo iptables -A INPUT -p tcp --dport 44001 -j DROP
+
+#ays hraman@ port@ gcum e iptable-i verev@
+sudo iptables -I INPUT -p tcp --dport 44001 -j ACCEPT
+
+
+# ays hraman@ port@ gcum e iptable-i verev@
+sudo iptables -I INPUT -p tcp -s 190.168.1.10 --dport 44001 -j ACCEPT
+
+
+# ays hraman@ port@ avelacnum e iptable-i 2 texum 
+sudo iptables -I INPUT -p tcp -s 190.168.1.10 --dport 44001 -j ACCEPT
+
+sudo systemctl status iptables
+sudo systemctl start iptables
+sudo systemctl enable iptables
+sudo service iptables save
+sudo systemctl restart iptables
+sudo iptables -L -n -v
+
+# 17) how create user and connect him
+sudo su
+adduser arevik       # for CentOS
+useradd -m arevik    # for ubuntu
+cd /home/arevik
+mkdir .ssh
+cd .ssh 
+vi authorized_keys
+chown arevik:arevik .ssh
+chown arevik:arevik authorized_keys
+chmod 700 .ssh/
+chmod 600 .ssh/authorized_keys
+visudo
+#root  ALL=(ALL)   ALL
+arevik ALL=(ALL)   NOPASSWD: ALL
+sudo vi /etc/ssh/sshd_config
+PubkeyAuthotization
+systemctl restart sshd  #for ubuntu "systemctl restart ssh"
+
+
+# 18) script for debian, ubuntu create user
+#!/bin/bash
+#!/bin/bash
+
+USER="arevik"
+PUBKEY="ssh-rsa YOUR_PUBLIC_KEY_HERE"
+
+HOME_DIR="/home/$USER"
+
+# Create user if not exist
+if ! id "$USER" &>/dev/null; then
+    useradd -m -s /bin/bash "$USER"
+fi
+
+# Create .ssh folder
+mkdir -p "$HOME_DIR/.ssh"
+
+# Add public key
+echo "$PUBKEY" > "$HOME_DIR/.ssh/authorized_keys"
+
+# Permissions
+chown -R "$USER:$USER" "$HOME_DIR/.ssh"
+chmod 700 "$HOME_DIR/.ssh"
+chmod 600 "$HOME_DIR/.ssh/authorized_keys"
+USER="arevik"
+PUBKEY="ssh-rsa YOUR_PUBLIC_KEY_HERE"
+
+HOME_DIR="/home/$USER"
+
+# Create user if not exist
+if ! id "$USER" &>/dev/null; then
+    useradd -m -s /bin/bash "$USER"
+fi
+
+# Create .ssh folder
+mkdir -p "$HOME_DIR/.ssh"
+
+# Add public key
+echo "$PUBKEY" > "$HOME_DIR/.ssh/authorized_keys"
+
+# Permissions
+chown -R "$USER:$USER" "$HOME_DIR/.ssh"
+chmod 700 "$HOME_DIR/.ssh"
+chmod 600 "$HOME_DIR/.ssh/authorized_keys"
+
+
+
+# 19) script for CentOS 9 create user
+
+#!/bin/bash
+USER="arevik"
+PUBKEY="ssh-rsa YOUR_PUBLIC_KEY_HERE"
+HOME_DIR="/home/$USER"
+SSHD_CONFIG="/etc/ssh/sshd_config"
+SUDOERS_FILE="/etc/sudoers"
+# Create user if not exists
+id "$USER" &>/dev/null || useradd -m -s /bin/bash "$USER"
+mkdir -p "$HOME_DIR/.ssh"
+echo "$PUBKEY" > "$HOME_DIR/.ssh/authorized_keys"
+chown -R "$USER:$USER" "$HOME_DIR/.ssh"
+chmod 700 "$HOME_DIR/.ssh"
+chmod 600 "$HOME_DIR/.ssh/authorized_keys"
+# Enable PubkeyAuthentication
+cp "$SSHD_CONFIG" "${SSHD_CONFIG}.bak_$(date +%F_%T)"
+grep -q "^#*PubkeyAuthentication" "$SSHD_CONFIG" && \
+    sed -i 's/^#*PubkeyAuthentication.*/PubkeyAuthentication yes/' "$SSHD_CONFIG" || \
+    echo "PubkeyAuthentication yes" >> "$SSHD_CONFIG"
+systemctl restart sshd
+# Add passwordless sudo
+cp "$SUDOERS_FILE" "${SUDOERS_FILE}.bak_$(date +%F_%T)"
+grep -q "^$USER ALL=(ALL) NOPASSWD: ALL" "$SUDOERS_FILE" || \
+    echo "$USER ALL=(ALL) NOPASSWD: ALL" >> "$SUDOERS_FILE"
+# Validate sudoers syntax
+if visudo -cf "$SUDOERS_FILE" >/dev/null; then
+    echo "Passwordless sudo configured for $USER"
+else
+    echo "ERROR: sudoers syntax invalid! Restore backup manually."
+fi
+
+echo "User $USER created, SSH key added, and sudo configured."
+
+
+# -----------------------------------------------------------------------------------
+#!/bin/bash
+adduser vanuser
+cd /home/vanuser || exit
+mkdir .ssh
+echo "your-public-key" >> .ssh/authorized_keys
+echo "PubkeyAuthentication yes" >> /etc/ssh/sshd_config
+chmod 700 .ssh/
+chmod 600 .ssh/authorized_keys
+chown vanuser:vanuser .ssh/authorized_keys
+chown  vanuser:vanuser .ssh
+systemctl restart sshd
+echo "Setup completed successfully"
