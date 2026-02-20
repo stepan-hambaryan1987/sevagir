@@ -1,0 +1,265 @@
+#!/bin/bash
+set -e
+#--------------------------------------------------------------------
+# Script to Install Prometheus Server on Linux Ubuntu
+# Tested on Ubuntu 22.04, 24.04
+#--------------------------------------------------------------------
+PROMETHEUS_VERSION="3.9.0"
+PROMETHEUS_FOLDER_CONFIG="/etc/prometheus"
+PROMETHEUS_FOLDER_TSDATA="/etc/prometheus/data"
+
+cd /tmp
+wget https://github.com/prometheus/prometheus/releases/download/v$PROMETHEUS_VERSION/prometheus-$PROMETHEUS_VERSION.linux-amd64.tar.gz
+tar xvfz prometheus-$PROMETHEUS_VERSION.linux-amd64.tar.gz
+cd prometheus-$PROMETHEUS_VERSION.linux-amd64
+
+mv prometheus /usr/bin/
+rm -rf /tmp/prometheus*
+
+mkdir -p $PROMETHEUS_FOLDER_CONFIG
+mkdir -p $PROMETHEUS_FOLDER_TSDATA
+
+
+cat <<EOF> $PROMETHEUS_FOLDER_CONFIG/prometheus.yml
+global:
+  scrape_interval: 10s
+
+scrape_configs:
+  - job_name      : "prometheus"
+    static_configs:
+      - targets: ["localhost:9090"]
+EOF
+
+useradd -rs /bin/false prometheus
+chown prometheus:prometheus /usr/bin/prometheus
+chown prometheus:prometheus $PROMETHEUS_FOLDER_CONFIG
+chown prometheus:prometheus $PROMETHEUS_FOLDER_CONFIG/prometheus.yml
+chown prometheus:prometheus $PROMETHEUS_FOLDER_TSDATA
+
+
+cat <<EOF> /etc/systemd/system/prometheus.service
+[Unit]
+Description=Prometheus Server
+After=network.target
+
+[Service]
+User=prometheus
+Group=prometheus
+Type=simple
+Restart=on-failure
+ExecStart=/usr/bin/prometheus \
+  --config.file       ${PROMETHEUS_FOLDER_CONFIG}/prometheus.yml \
+  --storage.tsdb.path ${PROMETHEUS_FOLDER_TSDATA}
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+systemctl daemon-reload
+systemctl start prometheus
+systemctl enable prometheus
+systemctl status prometheus --no-pager
+prometheus --version
+
+curl -X POST http://localhost:9090/-/reload
+
+
+
+############################
+# GRAFANA
+############################
+GRAFANA_VERSION="12.3.1"
+PROMETHEUS_URL="http://localhost:9090"
+
+apt-get install -y apt-transport-https software-properties-common
+
+mkdir -p /etc/apt/keyrings
+wget -qO- https://apt.grafana.com/gpg.key | gpg --dearmor > /etc/apt/keyrings/grafana.gpg
+
+echo "deb [signed-by=/etc/apt/keyrings/grafana.gpg] https://apt.grafana.com stable main" \
+  > /etc/apt/sources.list.d/grafana.list
+
+apt-get update -y
+apt-get install -y grafana
+
+mkdir -p /etc/grafana/provisioning/datasources
+
+cat <<EOF > /etc/grafana/provisioning/datasources/prometheus.yaml
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    url: ${PROMETHEUS_URL}
+    isDefault: true
+EOF
+
+chown -R grafana:grafana /etc/grafana/provisioning
+
+systemctl enable grafana-server
+systemctl restart grafana-server
+
+
+
+#------------------ Grafana ---------------#
+#--- install on ubuntu ---#
+sudo apt-get install -y apt-transport-https wget
+
+sudo mkdir -p /etc/apt/keyrings/
+wget -q -O - https://apt.grafana.com/gpg.key | gpg --dearmor | sudo tee /etc/apt/keyrings/grafana.gpg > /dev/null
+
+echo "deb [signed-by=/etc/apt/keyrings/grafana.gpg] https://apt.grafana.com stable main" | sudo tee -a /etc/apt/sources.list.d/grafana.list
+
+sudo apt-get update
+
+sudo apt-get install -y adduser libfontconfig1 musl
+wget https://dl.grafana.com/grafana-enterprise/release/12.3.1/grafana-enterprise_12.3.1_20271043721_linux_amd64.deb
+sudo dpkg -i grafana-enterprise_12.3.1_20271043721_linux_amd64.deb
+
+sudo systemctl daemon-reload
+sudo systemctl enable grafana-server
+sudo systemctl start grafana-server
+
+
+#!/bin/bash
+#--------------------------------------------------------------------
+# Script to Install Prometheus Node_Exporter on Linux
+# Tested on Ubuntu 22.04, 24.04, Amazon Linux 2023
+#--------------------------------------------------------------------
+# https://github.com/prometheus/node_exporter/releases
+NODE_EXPORTER_VERSION="1.10.2"
+
+cd /tmp
+wget https://github.com/prometheus/node_exporter/releases/download/v$NODE_EXPORTER_VERSION/node_exporter-$NODE_EXPORTER_VERSION.linux-amd64.tar.gz
+tar xvfz node_exporter-$NODE_EXPORTER_VERSION.linux-amd64.tar.gz
+cd node_exporter-$NODE_EXPORTER_VERSION.linux-amd64
+
+mv node_exporter /usr/bin/
+rm -rf /tmp/node_exporter*
+
+useradd -rs /bin/false node_exporter
+chown node_exporter:node_exporter /usr/bin/node_exporter
+
+
+cat <<EOF> /etc/systemd/system/node_exporter.service
+[Unit]
+Description=Prometheus Node Exporter
+After=network.target
+
+[Service]
+User=node_exporter
+Group=node_exporter
+Type=simple
+Restart=on-failure
+ExecStart=/usr/bin/node_exporter
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+systemctl daemon-reload
+systemctl start node_exporter
+systemctl enable node_exporter
+systemctl status node_exporter
+node_exporter --version
+
+
+
+#------------ create new dashboard ----------#
+
+1) Paste this PromQL query:
+
+100 - (
+  avg by (instance) (
+    rate(node_cpu_seconds_total{mode="idle"}[5m])
+  ) * 100
+)
+
+2) Top right → Panel options
+
+Title: CPU Usage (%)
+
+3) Standard options
+
+Unit: Percent (0-100)
+
+3) Min / Max
+
+Min: 0
+
+Max: 100
+
+4) Still in panel settings:
+
+Go to Thresholds
+
+Add:
+
+Yellow: 70
+
+Red: 80
+
+5) In Legend:
+
+Mode: Table
+
+Values: Last, Max
+
+Each VM (instance) will be shown separately.
+
+6) Top right → Save
+
+Name: My CPU Dashboard
+
+Folder: General
+
+🎉 You created your own dashboard.
+
+#------- add gmail --------#
+
+1) create app password
+    abcd efgh ijkl mnop
+
+2) Configure Grafana SMTP
+
+On Grafana VM:
+
+sudo vim /etc/grafana/grafana.ini
+
+
+Find [smtp] section and set exactly like this:
+
+[smtp]
+enabled = true
+host = smtp.gmail.com:587
+user = yourgmail@gmail.com
+password = your_gmail_app_password
+from_address = yourgmail@gmail.com
+from_name = Grafana Alerts
+skip_verify = false
+
+3) Restart Grafana
+sudo systemctl restart grafana-server
+
+
+Check status:
+
+sudo systemctl status grafana-server
+
+
+Must be active (running) ✅
+
+4) Create Email Contact Point
+
+Grafana UI → Alerting → Contact points → New contact point
+
+Name: gmail-alert
+
+Type: Email
+
+Addresses: yourgmail@gmail.com
+
+Click Save
+
+5) 
