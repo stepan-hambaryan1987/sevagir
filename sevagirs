@@ -1,0 +1,670 @@
+
+# 1) ------ eksctl install ------#
+
+curl --silent --location "https://github.com/weaveworks/eksctl/releases/latest/download/eksctl_$(uname -s)_amd64.tar.gz" | tar xz -C /tmp
+
+sudo mv /tmp/eksctl /usr/local/bin
+
+eksctl version
+
+# 2) ----- kubectl -----#
+
+curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+
+sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
+
+chmod +x kubectl
+mkdir -p ~/.local/bin
+mv ./kubectl ~/.local/bin/kubectl
+
+kubectl version --client     
+
+(Or use this for detailed view of version):
+
+kubectl version --client --output=yaml
+
+# 3) -----eks map config -----#
+
+aws configure
+aws configure --profile <user name>
+kubectl config view --minify  ????????????????????????????????????
+aws eks update-kubeconfig --name eks-arev-cluster
+kubectl get cm aws-auth -o yaml -n kube-system
+kubectl edit cm aws-auth -n kube-system
+
+kubectl apply -f my-file.yaml
+
+kubectl create rolebinding account-binding --role=account-role --serviceaccount=default:build-robot
+
+kubectl get rolebinding account-binding -o yaml > account-rolebinding.yaml
+
+# in kubernetes debugg pods
+
+kubectl run debug --rm -it --image=busybox -- sh  #sa stexcum e pod ev aystex karox enq cankacac podi hamar ir nersum hraman kanchenq, aranc mer cankali pod exec linelu, orinak nergevi hramanner@
+nslookup mysql
+nslookup backend
+nc -zv mysql 3306
+telnet mysql 3306
+wget -qO- http://backend:3000    # backend@ lsum e ays port@ te voch
+
+
+
+# kubernetisum user account certificate avtomat storagrelu hamar hraman, voric heto stexcum enq yaml file(kind - Issuer ev Certificate, voric heto secreti tvac tls.crt ev tls.key encode arac certificatnere texadrum enq cofig filum)
+kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.15.0/cert-manager.yaml
+
+
+apiVersion: v1
+data:
+  mapRoles: |
+    - groups:
+      - system:bootstrappers
+      - system:nodes
+      rolearn: arn:aws:iam::515966519427:role/ed-eks-worker
+      username: system:node:{{EC2PrivateDNSName}}
+  mapUsers: |
+    - userarn: arn:aws:iam::515966519427:user/tatev
+      groups:
+        - system:masters
+kind: ConfigMap
+metadata:
+  creationTimestamp: "2025-04-07T10:04:00Z"
+  name: aws-auth
+  namespace: kube-system
+  resourceVersion: "6655"
+  uid: ffaa30f4-b355-4480-97ec-79f2913bc7dc
+
+
+
+mapUsers: |
+  - userarn: arn:aws:iam::515966519427:user/tatev
+    groups:
+      - system:masters
+
+
+# 4) ----- install aws lb ingress controller with Manifests -----#
+# We will find out the name of the cluster.
+aws eks list-clusters --region eu-central-1
+
+# we can see AWS_ACCOUNT_ID
+AWS_ACCOUNT_ID=$(aws sts get-caller-identity \
+  --query Account \
+  --output text)
+
+echo $AWS_ACCOUNT_ID
+
+# we can see vpc id
+aws eks describe-cluster \
+  --name eks-arev-cluster \
+  --region us-east-1 \
+  --query 'cluster.resourcesVpcConfig.vpcId' \
+  --output text
+
+# A) create OIDC
+eksctl utils associate-iam-oidc-provider \
+  --region us-east-1 \
+  --cluster eks-arev-cluster \
+  --approve
+
+# show OIDC ID 
+aws iam list-open-id-connect-providers
+
+# B) download iam_policy.json
+curl -O https://raw.githubusercontent.com/kubernetes-sigs/aws-load-balancer-controller/v2.14.1/docs/install/iam_policy.json
+
+# C) create aws iam policy 
+aws iam create-policy \
+  --policy-name AWSLoadBalancerControllerIAMPolicy \
+  --policy-document file://iam_policy.json
+
+# D) create iamserviceaccount
+eksctl create iamserviceaccount \
+  --cluster=eks-arev-cluster \
+  --region=us-east-1 \
+  --namespace=kube-system \
+  --name=aws-load-balancer-controller \
+  --attach-policy-arn=arn:aws:iam::515966519427:policy/AWSLoadBalancerControllerIAMPolicy \
+  --override-existing-serviceaccounts \
+  --approve
+
+# check and show serviceaccount
+kubectl get serviceaccount \
+  aws-load-balancer-controller \
+  -n kube-system
+
+# E) install cert-manager
+kubectl apply \
+  --validate=false \
+  -f https://github.com/jetstack/cert-manager/releases/download/v1.13.5/cert-manager.yaml
+
+# chack and show cert-manager, you will see  3 pods (state running)
+kubectl get pods -n cert-manager
+
+#cert-manager
+#cert-manager-cainjector
+#cert-manager-webhook
+
+# we will check aws-load-balancer-controller releases version tag_name, which one is available
+curl -s https://api.github.com/repos/kubernetes-sigs/aws-load-balancer-controller/releases/latest \
+  | grep '"tag_name"'
+
+# example 
+"tag_name": "v3.5.0"
+
+#  F) downloade aws-load-balancer-controller releases
+curl -Lo v3_5_0_full.yaml \
+  https://github.com/kubernetes-sigs/aws-load-balancer-controller/releases/download/v3.5.0/v3_5_0_full.yaml
+
+# we will see servceAccount lines 
+grep -n "kind: ServiceAccount" v3_5_0_full.yaml
+
+# for example what we will see
+# styop@styop-Lenovo:~/infra-aws$ grep -n "kind: ServiceAccount" v3_5_0_full.yaml 1425:kind: ServiceAccount 1712:- kind: ServiceAccount 1727:- kind: ServiceAccount
+
+# in file to finde this lines
+sed -n '1415,1445p' v3_5_0_full.yaml
+
+# we will do backup file for secure
+cp v3_5_0_full.yaml v3_5_0_full.yaml.backup
+
+# then we will open file with nano and click ctrl + w andu put thear (kind: ServiceAccount) then Enter
+# we will delete kind: ServiceAccount all part (from apiVersion: v1 to namespace: kube-system)
+#  becouse we alredy created ServiceAccount 
+#  after deleted must stay this part
+#  ---
+# apiVersion: rbac.authorization.k8s.io/v1
+# kind: Role
+
+# we will see cluster name
+grep -n -- "--cluster-name" v3_5_0_full.yaml
+# if that output is for example
+# grep -n -- "--cluster-name" v3_5_0_full.yaml 1759: - --cluster-name=your-cluster-name
+# we will change it to our cluster name
+sed -i 's/--cluster-name=your-cluster-name/--cluster-name=eks-arev-cluster/' v3_5_0_full.yaml
+
+# G) apply  v3_5_0_full.yaml
+kubectl apply -f v3_5_0_full.yaml
+
+# check serviceAccount pod
+kubectl get pods -n kube-system | grep aws-load-balancer
+
+# if no running must see logs
+kubectl logs -n kube-system deployment/aws-load-balancer-controller
+
+# we must add vpc id thear
+# how can we finde vpc id ?, nano Ctrl + W put --cluster-name=mini-eks and Enter Ctrl + O Enter Ctrl + X
+# args:
+# - --cluster-name=mini-eks
+# - --aws-vpc-id=vpc-0f66e5b73b9cc1cf8
+# - --ingress-class=alb
+# then do 
+kubectl get pods -n kube-system | grep aws-load-balancer
+
+# create deployment, service and ingress roule
+kubectl apply -f nginx-alb.yaml
+
+# H) install ingressClass
+curl -Lo v3_5_0_ingclass.yaml \
+  https://github.com/kubernetes-sigs/aws-load-balancer-controller/releases/download/v3.5.0/v3_5_0_ingclass.yaml
+
+# apply v3_5_0_ingclass.yaml
+kubectl apply -f v3_5_0_ingclass.yaml
+
+# for check 
+kubectl get ingressclass
+
+# 4.1) ---------- install helm ----------#
+
+sudo apt update
+sudo apt install apt-transport-https curl -y
+curl https://baltocdn.com/helm/signing.asc | sudo apt-key add -
+
+echo "deb https://baltocdn.com/helm/stable/debian/ all main" | sudo tee /etc/apt/sources.list.d/helm-stable-debian.list
+
+sudo apt update1
+sudo apt install helm -y
+helm version
+
+# 4.2) -------- install aws ingress controller with HELM -------
+
+helm repo add eks https://aws.github.io/eks-charts
+helm repo update
+# create OIDC
+eksctl utils associate-iam-oidc-provider \
+  --region us-east-1 \
+  --cluster dev-my-cluster \
+  --approve
+# create ServiceAccount
+eksctl create iamserviceaccount \
+  --cluster=dev-my-cluster \
+  --namespace=kube-system \
+  --name=aws-load-balancer-controller \
+  --attach-policy-arn=arn:aws:iam::515966519427:policy/AWSLoadBalancerControllerIAMPolicy \
+  --region us-east-1 \
+  --approve
+
+# install aws Load Balancer
+helm upgrade --install aws-load-balancer-controller eks/aws-load-balancer-controller \
+  -n kube-system \
+  --set clusterName=<your-cluster-name> \
+  --set serviceAccount.create=false \
+  --set serviceAccount.name=aws-load-balancer-controller \
+  --set region=<region> \
+  --set vpcId=<your-vpc-id>
+
+# 5) ----------- install java --------#
+
+sudo apt-get update
+sudo apt-get install openjdk-11-jre    #number 11 is version java, which we will choos
+
+
+# 6) ---------- install jenkins --------#
+
+
+sudo wget -O /etc/apt/keyrings/jenkins-keyring.asc \
+  https://pkg.jenkins.io/debian-stable/jenkins.io-2023.key
+
+echo "deb [signed-by=/etc/apt/keyrings/jenkins-keyring.asc]" \
+  https://pkg.jenkins.io/debian-stable binary/ | sudo tee \
+  /etc/apt/sources.list.d/jenkins.list > /dev/null
+
+sudo apt-get update
+sudo apt-get install jenkins
+
+sudo systemctl enable jenkins
+sudo systemctl start jenkins
+sudo systemctl status jenkins
+
+# 7) ---------- install docker ----------#
+
+# System prep
+sudo apt-get update
+sudo apt-get install -y ca-certificates curl gnupg
+
+# GPG key
+sudo install -m 0755 -d /etc/apt/keyrings
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo tee /etc/apt/keyrings/docker.asc > /dev/null
+sudo chmod a+r /etc/apt/keyrings/docker.asc
+
+# Add repo (for 22.04 or fallback for 24.04)
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu jammy stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+
+# Install Docker
+sudo apt-get update
+sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+
+sudo systemctl status docker
+sudo systemctl start docker
+sudo systemctl enable docker
+
+# Test
+sudo docker run hello-world
+
+# Optional: no sudo
+sudo usermod -aG docker $USER
+newgrp docker
+
+# 8) ------- AWS and GCP credentials -------
+
+export AWS_ACCESS_KEY_ID=
+export AWS_SECRET_ACCESS_KEY=
+export AWS_DEFAULT_REGION=
+
+
+export GOOGLE_APPLICATION_CREDENTIALS="/home/styop/Desktop/arevik-key.json"
+export CLOUDSDK_CORE_PROJECT="my-gcp-project"
+export CLOUDSDK_COMPUTE_REGION="us-west1"
+export CLOUDSDK_COMPUTE_ZONE="us-west1-a"
+
+
+# 9) linux firewall iptables commands
+# To close (block) port 80 (HTTP) -A(Append)
+sudo iptables -A INPUT -p tcp --dport 80 -j DROP
+
+# To list iptables
+sudo iptables -L -n --line-numbers
+
+# This deletes rule number 3 in the INPUT chain.
+sudo iptables -D INPUT 3
+
+# To open port 80 (http) -D(Delete)
+sudo iptables -D INPUT -p tcp --dport 80 -j DROP
+
+# To save iptables rules
+sudo apt install iptables-persistent
+sudo netfilter-persistent save
+
+
+# 10)  delete localhost's cache
+sudo systemd-resolve --flush-caches
+
+
+# 11) script for user-data
+#!/bin/bash
+# Update system
+dnf update -y
+
+# Install nginx
+dnf install -y nginx
+
+# Enable and start nginx
+systemctl enable nginx
+systemctl start nginx
+
+# Create a styled index.html with public IP
+cat <<EOF > /usr/share/nginx/html/index.html
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Welcome</title>
+</head>
+<body style="background-color:yellow">
+  <h1 style="color:red; text-align:center; margin-top:100px;">
+    Hello from $(curl -s ipinfo.io/ip)
+  </h1>
+</body>
+</html>
+EOF
+
+
+# 12) create .ssh folder for jenkins user
+sudo mkdir -p /var/lib/jenkins/.ssh
+sudo cp .ssh/known_hosts /var/lib/jenkins/.ssh/
+sudo chown -R jenkins:jenkins /var/lib/jenkins/.ssh
+
+
+# for update
+sudo vim /etc/apt/sources.list.d/kubernetes.list
+
+#-----------------  DB  ------------------#
+
+# 13) psql login backend container, install mysql, login mysqldb container
+docker exec -it backend sh
+apt update
+apt install -y default-mysql-client
+mysql --version
+mysql -h mysql-db -u root -proot
+SHOW DATABASES;
+SELECT user, host FROM mysql.user;
+SELECT * FROM users;
+USE mydatabase;
+DELETE FROM users WHERE id = 1;
+
+
+#-----============  instal and login postgresql  ------==========#
+#--- login psql, create user, db in postgresql and login with new user
+sudo -u postgres psql                             # login psql
+CREATE USER myuser WITH PASSWORD 'mypassword';    # create user and password for that user
+ALTER USER myuser WITH SUPERUSER;                 # that user have root privileges, full access in psql
+GRANT ALL PRIVILEGES ON DATABASE mydb TO myuser;  # root privileges that db
+ALTER USER myuser CREATEDB;                       # User can create/drop their own databases
+CREATE DATABASE mydb OWNER myuser;                # create databasa for myuser user
+CREATE DATABASE my_new_database;                  # create databace
+\c my_new_database                                # you can connect that db
+\du                                               # can you see all users
+\l+                                               # can you see all db
+\q                                                # log out
+psql -U myuser -d mydb                            # write password for myuser and do Enter
+
+GRANT CONNECT ON DATABASE mysecond TO app_user;                                 # Разрешить login в DB
+
+GRANT USAGE ON SCHEMA public TO app_user;                                       # Разрешить использовать schema public
+
+GRANT SELECT ON ALL TABLES IN SCHEMA public TO app_user;                        # Дать readonly на все текущие tables mysecond db
+
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO app_user;   # Дать readonly на будущие tables
+
+
+#----------------  UBUNTU  ---------------#
+#-------- (20.04, 22.04, 24.04 "x86/64, amd64 → Standard servers") -------#
+sudo apt update
+sudo apt install wget ca-certificates gnupg -y
+wget -qO - https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+  | sudo gpg --dearmor -o /usr/share/keyrings/postgresql.gpg
+
+echo "deb [signed-by=/usr/share/keyrings/postgresql.gpg] \
+https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
+  | sudo tee /etc/apt/sources.list.d/pgdg.list
+
+sudo apt update
+
+# Install PostgreSQL 14 specifically
+sudo apt install postgresql-14 postgresql-client-14 postgresql-contrib-14 -y
+
+sudo apt install postgresql postgresql-contrib -y
+sudo systemctl enable --now postgresql
+sudo systemctl status postgresql
+psql --version
+
+sudo apt update
+sudo apt install nano vim -y
+
+sudo nano /etc/postgresql/*/main/pg_hba.conf  #change peer --> to --> scram-sha-256 (Ctrl+O Enter, Ctrl+x)
+sudo systemctl restart postgresql
+sudo -u postgres psql
+
+
+#-------- Debian -------#
+sudo apt update
+sudo apt install wget ca-certificates gnupg -y
+wget -qO - https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo gpg --dearmor -o /usr/share/keyrings/postgresql.gpg
+
+echo "deb [signed-by=/usr/share/keyrings/postgresql.gpg] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list
+sudo apt update
+
+# Install PostgreSQL 14 specifically
+sudo apt install postgresql-14 postgresql-client-14 postgresql-contrib-14 -y
+
+sudo apt install postgresql postgresql-contrib -y
+sudo systemctl enable --now postgresql
+sudo systemctl status postgresql
+psql --version
+sudo nano /etc/postgresql/*/main/pg_hba.conf  #change peer --> to --> scram-sha-256 (Ctrl+O Enter, Ctrl+x)
+sudo systemctl restart postgresql
+sudo -u postgres psql
+
+
+#---------- CentOS-9 ----------#
+sudo dnf install -y https://download.postgresql.org/pub/repos/yum/reporpms/EL-9-x86_64/pgdg-redhat-repo-latest.noarch.rpm
+sudo dnf -qy module disable postgresql
+
+sudo dnf install -y postgresql17-server postgresql17
+
+sudo /usr/pgsql-17/bin/postgresql-17-setup initdb
+
+sudo systemctl enable --now postgresql-17
+
+systemctl status postgresql-17
+
+sudo -u postgres psql
+
+sudo vi /var/lib/pgsql/17/data/pg_hba.conf  #change peer --> to --> scram-sha-256
+
+sudo systemctl restart postgresql-17
+
+ 
+
+# login postgresql
+# grum enq dbii ip hascen
+psql -h 34.64.160.227 -U postgres -d postgres
+
+# iptables firewall
+# ays hraman@ bacume port@ ev gcum iptable-i amenatak@
+sudo iptables -A INPUT -p tcp --dport 44001 -j ACCEPT
+
+# ays hraman@ pakume port@
+sudo iptables -A INPUT -p tcp --dport 44001 -j DROP
+
+#ays hraman@ port@ gcum e iptable-i verev@
+sudo iptables -I INPUT -p tcp --dport 44001 -j ACCEPT
+
+
+# ays hraman@ port@ gcum e iptable-i verev@
+sudo iptables -I INPUT -p tcp -s 190.168.1.10 --dport 44001 -j ACCEPT
+
+
+# ays hraman@ port@ avelacnum e iptable-i 2 texum 
+sudo iptables -I INPUT -p tcp -s 190.168.1.10 --dport 44001 -j ACCEPT
+
+sudo systemctl status iptables
+sudo systemctl start iptables
+sudo systemctl enable iptables
+sudo service iptables save
+sudo systemctl restart iptables
+sudo iptables -L -n -v
+
+# 14) how create user and connect him
+sudo su
+adduser arevik       # for CentOS
+useradd -m arevik    # for ubuntu
+cd /home/arevik
+mkdir .ssh
+cd .ssh 
+vi authorized_keys
+chown arevik:arevik .ssh
+chown arevik:arevik authorized_keys
+chmod 700 .ssh/
+chmod 600 .ssh/authorized_keys
+visudo
+#root  ALL=(ALL)   ALL
+arevik ALL=(ALL)   NOPASSWD: ALL
+sudo vi /etc/ssh/sshd_config
+PubkeyAuthotization
+systemctl restart sshd  #for ubuntu "systemctl restart ssh"
+
+
+# 14.1) script for debian, ubuntu create user
+#!/bin/bash
+#!/bin/bash
+
+USER="arevik"
+PUBKEY="ssh-rsa YOUR_PUBLIC_KEY_HERE"
+
+HOME_DIR="/home/$USER"
+
+# Create user if not exist
+if ! id "$USER" &>/dev/null; then
+    useradd -m -s /bin/bash "$USER"
+fi
+
+# Create .ssh folder
+mkdir -p "$HOME_DIR/.ssh"
+
+# Add public key
+echo "$PUBKEY" > "$HOME_DIR/.ssh/authorized_keys"
+
+# Permissions
+chown -R "$USER:$USER" "$HOME_DIR/.ssh"
+chmod 700 "$HOME_DIR/.ssh"
+chmod 600 "$HOME_DIR/.ssh/authorized_keys"
+
+# Create user if not exist
+if ! id "$USER" &>/dev/null; then
+    useradd -m -s /bin/bash "$USER"
+fi
+
+# Create .ssh folder
+mkdir -p "$HOME_DIR/.ssh"
+
+# Add public key
+echo "$PUBKEY" > "$HOME_DIR/.ssh/authorized_keys"
+
+# Permissions
+chown -R "$USER:$USER" "$HOME_DIR/.ssh"
+chmod 700 "$HOME_DIR/.ssh"
+chmod 600 "$HOME_DIR/.ssh/authorized_keys"
+
+
+
+# 14.2) script for CentOS 9 create user
+
+#!/bin/bash
+USER="arevik"
+PUBKEY="ssh-rsa YOUR_PUBLIC_KEY_HERE"
+HOME_DIR="/home/$USER"
+SSHD_CONFIG="/etc/ssh/sshd_config"
+SUDOERS_FILE="/etc/sudoers"
+# Create user if not exists
+id "$USER" &>/dev/null || useradd -m -s /bin/bash "$USER"
+mkdir -p "$HOME_DIR/.ssh"
+echo "$PUBKEY" > "$HOME_DIR/.ssh/authorized_keys"
+chown -R "$USER:$USER" "$HOME_DIR/.ssh"
+chmod 700 "$HOME_DIR/.ssh"
+chmod 600 "$HOME_DIR/.ssh/authorized_keys"
+# Enable PubkeyAuthentication
+cp "$SSHD_CONFIG" "${SSHD_CONFIG}.bak_$(date +%F_%T)"
+grep -q "^#*PubkeyAuthentication" "$SSHD_CONFIG" && \
+    sed -i 's/^#*PubkeyAuthentication.*/PubkeyAuthentication yes/' "$SSHD_CONFIG" || \
+    echo "PubkeyAuthentication yes" >> "$SSHD_CONFIG"
+systemctl restart sshd
+# Add passwordless sudo
+cp "$SUDOERS_FILE" "${SUDOERS_FILE}.bak_$(date +%F_%T)"
+grep -q "^$USER ALL=(ALL) NOPASSWD: ALL" "$SUDOERS_FILE" || \
+    echo "$USER ALL=(ALL) NOPASSWD: ALL" >> "$SUDOERS_FILE"
+# Validate sudoers syntax
+if visudo -cf "$SUDOERS_FILE" >/dev/null; then
+    echo "Passwordless sudo configured for $USER"
+else
+    echo "ERROR: sudoers syntax invalid! Restore backup manually."
+fi
+
+echo "User $USER created, SSH key added, and sudo configured."
+
+
+# -----------------------------------------------------------------------------------
+#!/bin/bash
+adduser vanuser
+cd /home/vanuser || exit
+mkdir .ssh
+echo "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOiK2W026RuSfMDHjcYMOTJ3bP37u6dgKK6D3eu8KX7Q" >> .ssh/authorized_keys
+echo "PubkeyAuthentication yes" >> /etc/ssh/sshd_config
+chmod 700 .ssh/
+chmod 600 .ssh/authorized_keys
+chown vanuser:vanuser .ssh/authorized_keys
+chown  vanuser:vanuser .ssh
+systemctl restart sshd
+echo "Setup completed successfully"
+
+adduser aiuser
+cd /home/aiuser
+mkdir .ssh
+cd .ssh 
+vi authorized_keys
+visudo
+#root ALL=(ALL)   ALL
+aiuser ALL=(ALL) NOPASSWD: ALL
+sudo vi /etc/ssh/sshd_config
+cd ..
+chmod 700 .ssh/
+chmod 600 .ssh/authorized_keys
+systemctl restart sshd
+#PubkeyAuthotization
+chown aiuser:aiuser .ssh
+cd .ssh
+chown aiuser:aiuser authorized_keys
+
+
+
+
+rdp project password - Tmxmfk00161!
+
+
+
+
+# 15) GET TOKEN AND CHAT ID FROM TELEGRAM
+
+8703597876:AAEXxywTfhu-S2E8yJWbnIU7BCxQ_-XA8Wo   (TOKEN BOT)   styop_grafana_alerts_bot
+"id":6496276336     chat id
+
+# ays url kanchum enq browserum vorpeszi stananq chat id
+https://api.telegram.org/bot8703597876:AAEXxywTfhu-S2E8yJWbnIU7BCxQ_-XA8Wo/getUpdates    
+
+# isk sa vorpeszi stugenq telegramin namak kgna te voch
+https://api.telegram.org/bot8703597876:AAEXxywTfhu-S2E8yJWbnIU7BCxQ_-XA8Wo/sendMessage?chat_id=6496276336&text=Hello%20from%20Grafana          
+
+
+
+
+https://app.slack.com/client/T014YCYLFRA/C0A066S48N6    arcx slack chat
+
+
+
